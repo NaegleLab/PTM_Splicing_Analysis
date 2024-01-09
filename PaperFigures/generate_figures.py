@@ -297,8 +297,9 @@ class Figure2():
         #sevents plot
         plt_data = self.splice_event_fractions.T.copy()
         #combine alternative splice site events into one group
-        plt_data['ASS'] = plt_data[["3' ASS", "3' and 5' ASS", "5' ASS"]].sum(axis = 1)
+        plt_data['Alternative Splice Site'] = plt_data[["3' ASS", "3' and 5' ASS", "5' ASS"]].sum(axis = 1)
         plt_data = plt_data.drop(["3' ASS", "3' and 5' ASS", "5' ASS"], axis = 1)
+        plt_data = plt_data.rename({'Skipped':'Skipped Exon','Mutually Exclusive':'Mutually Exclusive Exon'}, axis = 1)
         plt_data = plt_data.T
 
         # convert labels to shorthand
@@ -473,7 +474,7 @@ class Figure3:
         ax.yaxis.set_major_formatter(mtick.PercentFormatter(decimals = 0))
         ax.set_ylabel('Percent of PTMs\n with Altered Flank', fontsize = self.data.axes_label_size)
 
-        plt.xticks(rotation = 90, ha = 'center')
+        plt.xticks(rotation = 45, ha = 'right', fontsize = self.data.axes_label_size-1)
 
 
         #annotate with the number of ptms on top of the bar
@@ -2455,29 +2456,29 @@ class SupplementaryFigure14:
         plot_types.PSI_boxplots_BiologicalProcess(self.data.mapper, self.splice_seq, sig_ptms, ESRP1_low_id, ESRP1_high_id,
            process, annotation, min_effect_size=0.25, max_p = 0.05, gs = gs, fig = fig, figsize = figsize)
         
-    def PanelA(self):
+    def PanelA(self, figsize = (2.5,3)):
         """
         Cell motility PTMs
         """
-        self.boxplots(annotation = 'cell motility', figsize = (2.5,3))
+        self.boxplots(annotation = 'cell motility', figsize = figsize)
 
-    def PanelB(self):
+    def PanelB(self, figsize = (3.5,3)):
         """
         Cell growth PTMs
         """
-        self.boxplots(annotation = 'cell growth', figsize = (3.5,3))
+        self.boxplots(annotation = 'cell growth', figsize = figsize)
 
-    def PanelC(self):
+    def PanelC(self, figsize = (2.5,3)):
         """
         Autophagy PTMs
         """
-        self.boxplots(annotation = 'autophagy',figsize = (2.5,3))
+        self.boxplots(annotation = 'autophagy',figsize = figsize)
         
-    def PanelD(self):
+    def PanelD(self, figsize = (3.5,3)):
         """"
         Cell Differentiation
         """
-        self.boxplots(annotation = 'cell differentiation', figsize = (3.5,3))
+        self.boxplots(annotation = 'cell differentiation', figsize = figsize)
 
 
 
@@ -2755,7 +2756,7 @@ class SupplementaryFigure16():
         """
         Plot the enrichment of both tyrosine and serine/threonine kinases for known substrates in ESRP1-correlated PTMs
         """
-        plt.figure(figsize = (3,4))
+        plt.figure(figsize = (3,3.5))
         #color bars red if significant, grey if not
         colors = []
         for p in self.kinase_enrichment_known['p']:
@@ -2783,9 +2784,10 @@ class SupplementaryFigure16():
         Make kstar-style plot to plot the median enrichment values across the 50 kinase-substrate prediction networks
         """
         plt_data = self.st_kinase_enrichment_predicted.loc[['AKT1', 'AKT2', 'AKT3','SGK1', 'SGK2', 'SGK3'], ['High', 'Low']]
-        dots = kstar_plot.DotPlot(-np.log10(plt_data), plt_data, figsize = (1,4),  colormap = {0: '#6b838f', 1: '#0D52BD'})
+        dots = kstar_plot.DotPlot(-np.log10(plt_data), plt_data, figsize = (1,3.5),  colormap = {0: '#6b838f', 1: '#0D52BD'}, legend_title = '-log10(p)')
         #dots.drop_kinases_with_no_significance()
-        dots.dotplot(size_legend = False, color_legend = False)
+        dots.dotplot(color_legend = False)
+        plt.xlabel('ESRP1 Status', fontsize = 10)
 
 class SupplementaryTable1():
     """
@@ -2795,27 +2797,23 @@ class SupplementaryTable1():
         #point to figure data class
         self.data = data
 
-        #construct to convert isoform id back to transcript ids
-        isoform_to_transcripts = data.mapper.isoforms[['Transcript stable ID', 'Isoform ID']].copy()
-        isoform_to_transcripts.index = isoform_to_transcripts['Isoform ID']
-        isoform_to_transcripts = isoform_to_transcripts['Transcript stable ID'].to_dict()
-        self.isoform_to_transcripts = isoform_to_transcripts
+    def create_table(self, save_dir):
+        #grab function enrichment data, remove extra data, and rename columns to be clearer
+        function = pd.read_csv(self.data.analysis_dir + '/Constitutive_Rates/Enrichment/Function_Enrichment.csv')
+        function = function.drop(['Unnamed: 0', 'Subset'], axis = 1)
+        function = function[['Function', 'Number Across All PTMs', 'Number Across PTM subset', 'Fraction in PTM subset', 'Odds Ratio', 'BH adjusted p']]
+        function = function.rename({'Number Across All PTMs': 'Number of PTMs in Proteome with Function', 'Number Across PTM subset': "Number that are Constitutive", 'Fraction in PTM subset': 'Fraction that are Constitutive', 'BH adjusted p': 'Adjusted p-value'}, axis = 1)
+        #repeat for process enrichment
+        process = pd.read_csv(self.data.analysis_dir + '/Constitutive_Rates/Enrichment/Process_Enrichment.csv')
+        process = process.drop(['Unnamed: 0', 'Subset'], axis = 1)
+        process = process[['Process', 'Number Across All PTMs', 'Number Across PTM subset', 'Fraction in PTM subset', 'Odds Ratio', 'BH adjusted p']]
+        process = process.rename({'Number Across All PTMs': 'Number of PTMs in Proteome associated with Process', 'Number Across PTM subset': "Number that are Constitutive", 'Fraction in PTM subset': 'Fraction that are Constitutive', 'BH adjusted p': 'Adjusted p-value'}, axis = 1)
+        #save each table to a different sheet of the same excel file
+        writer = pd.ExcelWriter(save_dir + 'SupplementaryTable1.xlsx', engine='openpyxl')
+        function.to_excel(writer, sheet_name='Molecular Function Enrichment', index = False)
+        process.to_excel(writer, sheet_name='Biological Process Enrichment', index = False)
+        writer.close()
 
-        #get function and process enrichment
-        self.calculateEnrichment(collapse_annotations = True)
-
-    def convert_isoform_to_transcript(self, all_isoform_lists):
-        all_transcript_lists = []
-        for isoform_list in all_isoform_lists:
-            if isoform != isoform:
-                all_transcript_lists.append(np.nan)   
-            else:
-                transcript_list = []
-                for isoform in isoform_list.split(','):
-                    transcript_list.append(self.isoform_to_transcripts[isoform])
-                all_transcript_lists.append(';'.join(transcript_list))
-        return all_transcript_lists
-    
     def calculateEnrichment(self, collapse_annotations = False, include_unknown = True, fishers = True):
         """
         Calculate enrichment of PTMs in constitutive or non-constititive ptms found in mapper.ptm_info, for each annotation and each modification class (including all PTMs)
