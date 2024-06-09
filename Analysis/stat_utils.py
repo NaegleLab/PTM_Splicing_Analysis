@@ -132,7 +132,7 @@ def constructPivotTable(ptms, regulatory, reference_col = 'ON_FUNCTION', collaps
     annotation : pandas dataframe
         dataframe with PTMs in the rows and annotations in the columns, with 1 indicating that the PTM has that annotation
     """
-    ptms = ptms.merge(regulatory[['ON_FUNCTION','ON_PROCESS', 'ON_PROT_INTERACT','Substrate']], right_on = 'Substrate', left_on = 'PTM', how = 'left')
+    ptms = ptms.merge(regulatory[[reference_col, 'Substrate']], right_on = 'Substrate', left_on = 'PTM', how = 'left')
     #create matrix indicating function of each ptm: ptm in the rows, function in columns, and 1 indicating that the ptm has that function## create molecular function table, with
     annotation = ptms.copy()
     if include_unknown:

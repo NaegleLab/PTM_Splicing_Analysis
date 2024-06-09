@@ -369,8 +369,12 @@ def compareTranscripts(mapper, canonical_transcript, alternative_transcript,ptm 
         ax = [fig.add_subplot(gs2[0]), fig.add_subplot(gs2[1])]
     
     if ptm is not None:
-        ptm = mapper.ptm_coordinates[mapper.ptm_coordinates['Source of PTM'] == ptm]
-        ptm_loc = ptm['Gene Location (NC)']
+        ptm = mapper.ptm_coordinates[mapper.ptm_coordinates['Source of PTM'].str.contains(ptm)]
+        if ptm.shape[0] >= 1:
+            ptm_loc = ptm['Gene Location (hg38)'].values[0]
+        else:
+            ptm_loc = None   
+            print('PTM information not found in PTM mapper data')   
     else:
         ptm_loc = None
         

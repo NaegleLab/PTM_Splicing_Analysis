@@ -6,7 +6,7 @@ import numpy as np
 import seaborn as sns
 
 
-def getOverallDensities(mapper, exploded_mod):
+def getOverallDensities_Canonical(mapper, exploded_mod):
 	"""
 	Compute overall PTM density in the proteome, as well as the density broken down by modification type
 	
@@ -17,9 +17,11 @@ def getOverallDensities(mapper, exploded_mod):
 	exploded_mod: Pandas dataframe
         Version of mapper.ptm_info with unique modification types separated into different rows
 	"""
+	ptm_info = mapper.ptm_info[mapper.ptm_info['Isoform Type'] == 'Canonical'].copy()
+	exploded_mod = exploded_mod[exploded_mod['Isoform Type'] == 'Canonical'].copy()
 	#grab first transcript associated with canonical protein, and use this information (avoid double counting the same protein)
-	mapper.ptm_info['First Transcript'] = mapper.ptm_info['Transcripts'].apply(lambda x: x.split(';')[0])
-	ptm_number = mapper.ptm_info.groupby('First Transcript').size()
+	ptm_info['First Transcript'] = ptm_info['Transcripts'].apply(lambda x: x.split(';')[0])
+	ptm_number = ptm_info.groupby('First Transcript').size()
 
 	#get protein length for	 transcripts
 	tmp_transcripts = mapper.transcripts.dropna(subset = 'Amino Acid Sequence').copy()
@@ -27,37 +29,57 @@ def getOverallDensities(mapper, exploded_mod):
 
 	#get density of ptms relative to total protein length
 	overall_ptm_density = (ptm_number.sum()/tmp_transcripts.loc[ptm_number.index, 'Protein Length'].sum())*1000
-	mod_densities = (exploded_mod.groupby('Mod Class').size()/tmp_transcripts.loc[ptm_number.index, 'Protein Length'].sum())*1000
+	mod_densities = (exploded_mod.groupby('Modification Class').size()/tmp_transcripts.loc[ptm_number.index, 'Protein Length'].sum())*1000
 
 
 	#get overall densities
 	overall_density = mod_densities.reset_index()
 	overall_density = overall_density.rename({0:'Density in Proteome (per 1000aa)'}, axis = 1)
-	overall_proteome = pd.DataFrame({'Mod Class': 'All', 'Density in Proteome (per 1000aa)':overall_ptm_density}, index = [300])
+	overall_proteome = pd.DataFrame({'Modification Class': 'All', 'Density in Proteome (per 1000aa)':overall_ptm_density}, index = [300])
 	overall_density = pd.concat([overall_proteome,overall_density])
-	overall_density.index = overall_density['Mod Class']
-	overall_density = overall_density.drop(['Mod Class'], axis = 1)
+	overall_density.index = overall_density['Modification Class']
+	overall_density = overall_density.drop(['Modification Class'], axis = 1)
 	return overall_density
-	
+
+def getOverallDensities_Isoforms(mapper):
+	iso_ptms = mapper.isoform_ptms[mapper.isoform_ptms['Mapping Result'] == 'Success'].copy()
+	num_ptms = iso_ptms.groupby('Isoform ID').size()
+	num_residues = iso_ptms.groupby('Isoform ID')['Isoform Length'].mean()
+	mod_classes = ['All']
+	ptm_density = [(num_ptms/num_residues.loc[num_ptms.index]).mean()*1000]
+
+	exploded_iso = iso_ptms.copy()
+	exploded_iso['Modification Class'] = exploded_iso['Modification Class'].apply(lambda x: x.split(';') if x == x else np.nan)
+	exploded_iso = exploded_iso.explode('Modification Class').drop_duplicates()
+	for mod in exploded_iso['Modification Class'].unique():
+		mod_classes.append(mod)
+		num_ptms = exploded_iso[exploded_iso['Modification Class'] == mod].groupby('Isoform ID').size()
+		num_residues = exploded_iso[exploded_iso['Modification Class'] ==  mod].groupby('Isoform ID')['Isoform Length'].mean()
+		ptm_density.append((num_ptms/num_residues.loc[num_ptms.index]).mean()*1000)
+
+	overall_density = pd.DataFrame({'Density in Proteome (per 1000aa)':ptm_density}, index = mod_classes)
+	return overall_density
+
 def addPTMsToExons(exons, mapper, exploded_ptms, mod_groups, exon_column = 'Exon'):
 	"""
 	Given dataframe of tissue specific exons, add PTM information to each exon
 	"""
 	#check canonical exons for ptm info first
-	ts_ptms = exons.merge(exploded_ptms, left_on = exon_column, right_on = 'Exon stable ID', how = 'left')
-	ts_ptms = ts_ptms[[exon_column, 'PTM', 'Modification', 'Exon AA Seq (Full Codon)']].drop_duplicates()
-	ts_ptms = ts_ptms.rename({'PTM':'Source of PTM'}, axis = 1)
+	#ts_ptms = exons.merge(exploded_ptms, left_on = exon_column, right_on = 'Exon stable ID', how = 'left')
+	#ts_ptms = ts_ptms[[exon_column, 'PTM', 'Modification', 'Exon AA Seq (Full Codon)']].drop_duplicates()
+	#ts_ptms = ts_ptms.rename({'PTM':'Source of PTM'}, axis = 1)
 	#check alternative exons for ptm info next
 	ts_ptms2 = exons.merge(mapper.alternative_ptms[mapper.alternative_ptms['Mapping Result'] == 'Success'], left_on = exon_column, right_on = 'Exon ID (Alternative)', how = 'left')
-	ts_ptms2 = ts_ptms2[[exon_column, 'Source of PTM', 'Modification', 'Exon AA Seq (Full Codon)']].drop_duplicates()
+	ts_ptms2 = ts_ptms2[[exon_column, 'Source of PTM', 'Modification Class', 'Exon AA Seq (Full Codon)']].drop_duplicates()
 	#combine information
-	ts_ptms = pd.concat([ts_ptms, ts_ptms2])
+	#ts_ptms = pd.concat([ts_ptms, ts_ptms2])
+	ts_ptms = ts_ptms2
 	ts_ptms = ts_ptms.rename({exon_column:'Exon stable ID'}, axis = 1)
 	#separate unique Modification
-	ts_ptms['Modification'] = ts_ptms['Modification'].apply(lambda x: x.split(';') if x == x else np.nan)
-	ts_ptms = ts_ptms.explode('Modification')
-	ts_ptms = ts_ptms.merge(mod_groups, left_on = 'Modification', right_on = 'Mod Name', how = 'left')
-	ts_ptms = ts_ptms.drop(['Mod Name', 'Modification'], axis = 1)
+	ts_ptms['Modification Class'] = ts_ptms['Modification Class'].apply(lambda x: x.split(';') if x == x else np.nan)
+	ts_ptms = ts_ptms.explode('Modification Class')
+	#ts_ptms = ts_ptms.merge(mod_groups, on = 'Modification', how = 'left')
+	#ts_ptms = ts_ptms.drop(['Modification'], axis = 1)
 	ts_ptms = ts_ptms.drop_duplicates()
 	return ts_ptms
 	
@@ -154,10 +176,10 @@ def getExonCharacteristics(exon_data, mod_type = 'All'):
         num_ptms_in_exon = exon_data.groupby('Exon stable ID')['Source of PTM'].nunique()
         num_ptms_in_exon.name = 'Number of PTMs'
     else:
-        num_ptms_in_exon = exon_data.groupby(['Exon stable ID', 'Mod Class'])['Source of PTM'].nunique()
+        num_ptms_in_exon = exon_data.groupby(['Exon stable ID', 'Modification Class'])['Source of PTM'].nunique()
         num_ptms_in_exon.name = 'Number of PTMs'
         num_ptms_in_exon = num_ptms_in_exon.reset_index()
-        num_ptms_in_exon = num_ptms_in_exon[num_ptms_in_exon['Mod Class'] == mod_type]
+        num_ptms_in_exon = num_ptms_in_exon[num_ptms_in_exon['Modification Class'] == mod_type]
         num_ptms_in_exon = num_ptms_in_exon.set_index('Exon stable ID')['Number of PTMs']
     exon_density = exon_data.merge(num_ptms_in_exon, left_on = 'Exon stable ID', right_index = True, how = 'left')
     exon_density = exon_density[['Exon stable ID', 'Number of Residues', 'Number of PTMs']].drop_duplicates()
@@ -201,7 +223,7 @@ def getTSData(mapper, exploded_ptms, exploded_mod, mod_groups, figshare_dir = '.
 	trim_exons = trim_exons.dropna(subset = 'Exon AA Seq (Full Codon)')
 	
 	print('Getting PTM Density across the entire proteome')
-	overall_ptm_density = getOverallDensities(mapper, exploded_mod)
+	overall_ptm_density = getOverallDensities_Canonical(mapper, exploded_mod)
 	print('Getting PTMs in tissue specific exons from Buljan et al. (2012)')
 	tse_ptms = getBuljanPTMs(trim_exons, mapper, exploded_ptms, mod_groups, figshare_dir = figshare_dir)
 	tse_ptms['Data Source'] = 'Buljan2012'
@@ -212,24 +234,24 @@ def getTSData(mapper, exploded_ptms, exploded_mod, mod_groups, figshare_dir = '.
 	gp_ts_ptms = getGP_PTMs(mapper, trim_exons, exploded_ptms, mod_groups, figshare_dir = figshare_dir)
 	gp_ts_ptms['Data Source'] = 'Gonzalez-Porta2013'
 	all_data = pd.concat([tse_ptms , appris_ts_ptms, gp_ts_ptms])
-	all_data = all_data.drop_duplicates(subset = ['Exon stable ID', 'Source of PTM', 'Mod Class'])
+	all_data = all_data.drop_duplicates(subset = ['Exon stable ID', 'Source of PTM', 'Modification Class'])
 	
-	overall_ptm_density = getOverallDensities(mapper, exploded_mod)
+	#overall_ptm_density = getOverallDensities(mapper, exploded_mod)
 	
 	#get overall densities
-	sizes = exploded_mod.groupby('Mod Class').size()
+	sizes = exploded_mod.groupby('Modification Class').size()
 	sizes = sizes[sizes > size_cutoff].sort_values(ascending = False)
 	mods_to_keep = sizes.index
 	#plt_data1 = mod_densities[mods_to_keep].reset_index()
 	#plt_data1['Type'] = 'Entire Proteome'
-	#overall_proteome = pd.DataFrame({'Mod Class': 'All', 0:overall_ptm_density,'Type':'Entire Proteome'}, index = [300])
+	#overall_proteome = pd.DataFrame({'Modification Class': 'All', 0:overall_ptm_density,'Type':'Entire Proteome'}, index = [300])
 	#plt_data1 = pd.concat([overall_proteome, plt_data1])
-	#plt_data1.index = plt_data1['Mod Class']
+	#plt_data1.index = plt_data1['Modification Class']
 	
 	print('Calculating PTM density in tissue-specific exons')
 	#get number of aa in each exon
 	all_data['Number of Residues'] = all_data['Exon AA Seq (Full Codon)'].apply(len)
-	all_data2 = all_data[['Exon stable ID', 'Source of PTM', 'Number of Residues', 'Mod Class']].copy()
+	all_data2 = all_data[['Exon stable ID', 'Source of PTM', 'Number of Residues', 'Modification Class']].copy()
 	mod_density = {}
 	for mod in mods_to_keep:
 		exon_density, mod_density[mod] = getExonCharacteristics(all_data2, mod_type = mod)
@@ -246,11 +268,11 @@ def getTSData(mapper, exploded_ptms, exploded_mod, mod_groups, figshare_dir = '.
 	#get ts densities, normalize to overall
 	#all_data['Exon Length'] = all_data['Exon AA Seq (Full Codon)'].apply(len)
 	#num_aa_tse = all_data.drop_duplicates('Exon stable ID')['Exon Length'].sum()
-	#tse_mods = [mod for mod in mods_to_keep if mod in all_data['Mod Class'].values]
-	#plt_data2 = ((all_data.groupby('Mod Class').size()/num_aa_tse)*1000)[tse_mods].reset_index()
-	#overall_tse = pd.DataFrame({'Mod Class': 'All', 0:(all_data['Source of PTM'].nunique()/num_aa_tse)*1000}, index = [100])
+	#tse_mods = [mod for mod in mods_to_keep if mod in all_data['Modification Class'].values]
+	#plt_data2 = ((all_data.groupby('Modification Class').size()/num_aa_tse)*1000)[tse_mods].reset_index()
+	#overall_tse = pd.DataFrame({'Modification Class': 'All', 0:(all_data['Source of PTM'].nunique()/num_aa_tse)*1000}, index = [100])
 	#plt_data2 = pd.concat([overall_tse,plt_data2])
-	#plt_data2.index = plt_data2['Mod Class']
+	#plt_data2.index = plt_data2['Modification Class']
 	#plt_data1 = plt_data1.loc[['All'] + tse_mods]
 	#plt_data2[0] = plt_data2.loc[plt_data1.index, 0]/ plt_data1[0]
 	
